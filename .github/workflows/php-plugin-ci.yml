@@ -1,0 +1,149 @@
+name: PHP Plugin CI
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: PHP Lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Check composer.json exists
+        run: |
+          if [ ! -f composer.json ]; then
+            echo "::error::composer.json not found in repository root"
+            exit 1
+          fi
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          coverage: none
+
+      - name: Install Composer dependencies
+        run: |
+          if [ -f composer.lock ]; then
+            composer install --prefer-dist --no-progress --no-interaction
+          else
+            echo "::warning::composer.lock not found, running composer install without lockfile"
+            composer install --prefer-dist --no-progress --no-interaction
+          fi
+
+      - name: PHP syntax check
+        run: |
+          echo "Checking PHP syntax..."
+          errors=0
+
+          # Lint root PHP files (plugin bootstrap)
+          for file in *.php; do
+            if [ -f "$file" ]; then
+              if ! php -l "$file" 2>&1; then
+                errors=$((errors + 1))
+              fi
+            fi
+          done
+
+          # Lint includes/ directory if present
+          if [ -d "includes" ]; then
+            while IFS= read -r -d '' file; do
+              if ! php -l "$file" 2>&1; then
+                errors=$((errors + 1))
+              fi
+            done < <(find includes -name "*.php" -print0)
+          fi
+
+          # Lint src/ directory if present
+          if [ -d "src" ]; then
+            while IFS= read -r -d '' file; do
+              if ! php -l "$file" 2>&1; then
+                errors=$((errors + 1))
+              fi
+            done < <(find src -name "*.php" -print0)
+          fi
+
+          # Lint classes/ directory if present
+          if [ -d "classes" ]; then
+            while IFS= read -r -d '' file; do
+              if ! php -l "$file" 2>&1; then
+                errors=$((errors + 1))
+              fi
+            done < <(find classes -name "*.php" -print0)
+          fi
+
+          # Lint elementor/ directory if present
+          if [ -d "elementor" ]; then
+            while IFS= read -r -d '' file; do
+              if ! php -l "$file" 2>&1; then
+                errors=$((errors + 1))
+              fi
+            done < <(find elementor -name "*.php" -print0)
+          fi
+
+          if [ $errors -gt 0 ]; then
+            echo "::error::Found $errors PHP syntax error(s)"
+            exit 1
+          fi
+
+          echo "PHP syntax check passed"
+
+  test:
+    name: PHPUnit Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Check composer.json exists
+        run: |
+          if [ ! -f composer.json ]; then
+            echo "::error::composer.json not found in repository root"
+            exit 1
+          fi
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          coverage: none
+
+      - name: Get Composer cache directory
+        id: composer-cache
+        run: echo "dir=$(composer config cache-files-dir)" >> $GITHUB_OUTPUT
+
+      - name: Cache Composer dependencies
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.composer-cache.outputs.dir }}
+          key: ${{ runner.os }}-composer-${{ hashFiles('**/composer.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-composer-
+
+      - name: Install Composer dependencies
+        run: |
+          if [ -f composer.lock ]; then
+            composer install --prefer-dist --no-progress --no-interaction
+          else
+            echo "::warning::composer.lock not found, running composer install without lockfile"
+            composer install --prefer-dist --no-progress --no-interaction
+          fi
+
+      - name: Run tests
+        run: |
+          # Check if composer test script exists
+          if composer run-script --list 2>/dev/null | grep -q "^  test "; then
+            echo "Running: composer test"
+            composer test
+          elif [ -f vendor/bin/phpunit ]; then
+            echo "Running: vendor/bin/phpunit"
+            vendor/bin/phpunit
+          else
+            echo "::warning::No test script found in composer.json and vendor/bin/phpunit not available"
+            echo "Skipping tests"
+          fi
