@@ -15,7 +15,7 @@ This repository contains **reusable GitHub Actions workflows** that product repo
 Reusable CI workflow for WordPress plugin repositories.
 
 **Jobs:**
-- **lint** — PHP 8.2 syntax check on plugin files (root `*.php`, `includes/`, `src/`)
+- **lint** — PHP 8.2 syntax check on plugin files (root `*.php`, `includes/`, `src/`, `classes/`, `elementor/`)
 - **test** — Runs `composer test` if defined, otherwise `vendor/bin/phpunit`
 
 **Requirements:**
