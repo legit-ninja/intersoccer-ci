@@ -1,0 +1,83 @@
+name: Theme Smoke Test
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    name: PHP Lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          coverage: none
+
+      - name: PHP syntax check
+        run: |
+          echo "Checking theme PHP syntax..."
+          errors=0
+
+          # Lint standard theme files
+          for file in functions.php page.php index.php header.php footer.php sidebar.php single.php archive.php search.php 404.php comments.php; do
+            if [ -f "$file" ]; then
+              echo "Checking $file"
+              if ! php -l "$file" 2>&1; then
+                errors=$((errors + 1))
+              fi
+            fi
+          done
+
+          # Lint templates/ directory if present
+          if [ -d "templates" ]; then
+            echo "Checking templates/ directory"
+            while IFS= read -r -d '' file; do
+              if ! php -l "$file" 2>&1; then
+                errors=$((errors + 1))
+              fi
+            done < <(find templates -name "*.php" -print0)
+          fi
+
+          # Lint template-parts/ directory if present
+          if [ -d "template-parts" ]; then
+            echo "Checking template-parts/ directory"
+            while IFS= read -r -d '' file; do
+              if ! php -l "$file" 2>&1; then
+                errors=$((errors + 1))
+              fi
+            done < <(find template-parts -name "*.php" -print0)
+          fi
+
+          # Lint woocommerce/ directory if present
+          if [ -d "woocommerce" ]; then
+            echo "Checking woocommerce/ directory"
+            while IFS= read -r -d '' file; do
+              if ! php -l "$file" 2>&1; then
+                errors=$((errors + 1))
+              fi
+            done < <(find woocommerce -name "*.php" -print0)
+          fi
+
+          # Lint inc/ directory if present (common pattern)
+          if [ -d "inc" ]; then
+            echo "Checking inc/ directory"
+            while IFS= read -r -d '' file; do
+              if ! php -l "$file" 2>&1; then
+                errors=$((errors + 1))
+              fi
+            done < <(find inc -name "*.php" -print0)
+          fi
+
+          if [ $errors -gt 0 ]; then
+            echo "::error::Found $errors PHP syntax error(s)"
+            exit 1
+          fi
+
+          echo "Theme PHP syntax check passed"
