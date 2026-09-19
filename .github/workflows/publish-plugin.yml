@@ -1,0 +1,163 @@
+# Reusable workflow: publish a WordPress plugin ZIP to Underdog Unlimited.
+#
+# Callers handle `on: release` / `workflow_dispatch`, compute version,
+# and invoke this workflow with inputs.
+
+name: Publish Plugin
+
+on:
+  workflow_call:
+    inputs:
+      plugin_slug:
+        description: "UU Admin slug / ZIP folder name (e.g. player-management)"
+        required: true
+        type: string
+      bootstrap_php:
+        description: "Main plugin PHP filename at repo root (e.g. player-management.php)"
+        required: true
+        type: string
+      version:
+        description: "Version to publish (e.g. 2.7.20 or 2.7.20-rc3, without leading v)"
+        required: true
+        type: string
+      changelog:
+        description: "Release notes / changelog text (optional)"
+        required: false
+        type: string
+        default: ""
+      publish_url:
+        description: "Underdog Unlimited publish base URL"
+        required: false
+        type: string
+        default: "https://plugins.underdogunlimited.com"
+    secrets:
+      UU_PUBLISH_TOKEN:
+        description: "Publish token (udpub_…)"
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    name: Build & Publish
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate inputs
+        env:
+          SLUG: ${{ inputs.plugin_slug }}
+          BOOTSTRAP: ${{ inputs.bootstrap_php }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          if [[ -z "$SLUG" ]]; then
+            echo "::error::plugin_slug input is required"
+            exit 1
+          fi
+          if [[ -z "$BOOTSTRAP" ]]; then
+            echo "::error::bootstrap_php input is required"
+            exit 1
+          fi
+          if [[ ! -f "$BOOTSTRAP" ]]; then
+            echo "::error::Bootstrap file $BOOTSTRAP not found at repo root"
+            exit 1
+          fi
+          if [[ -z "$VERSION" ]]; then
+            echo "::error::version input is required"
+            exit 1
+          fi
+          # Strip leading v if caller passed one
+          VERSION="${VERSION#v}"
+          # Validate version format: semver with optional fourth segment and prerelease
+          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(\.[0-9]+)?([-+][A-Za-z0-9.-]+)?$ ]]; then
+            echo "::error::Version must look like 1.2.3, 1.2.3.1, or 1.2.3-rc1 (got: $VERSION)"
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Validated: slug=$SLUG, bootstrap=$BOOTSTRAP, version=$VERSION"
+        id: validate
+
+      - name: Build plugin ZIP
+        env:
+          SLUG: ${{ inputs.plugin_slug }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          VERSION="${VERSION#v}"
+          mkdir -p "dist/${SLUG}"
+
+          # Exclude dev/CI artifacts; align with typical deploy.sh excludes
+          rsync -a \
+            --exclude='.git' \
+            --exclude='.github' \
+            --exclude='.gitignore' \
+            --exclude='dist' \
+            --exclude='node_modules' \
+            --exclude='vendor' \
+            --exclude='tests' \
+            --exclude='cypress' \
+            --exclude='docs' \
+            --exclude='coverage' \
+            --exclude='.phpunit.result.cache' \
+            --exclude='.taskfiles' \
+            --exclude='wp-admin' \
+            --exclude='composer.json' \
+            --exclude='composer.lock' \
+            --exclude='package.json' \
+            --exclude='package-lock.json' \
+            --exclude='phpunit.xml' \
+            --exclude='phpunit.xml.dist' \
+            --exclude='Taskfile.yaml' \
+            --exclude='*.log' \
+            --exclude='debug.log' \
+            --exclude='*.sh' \
+            --exclude='*.md' \
+            --exclude='*.list' \
+            --exclude='run-*.php' \
+            --exclude='.DS_Store' \
+            --exclude='*.swp' \
+            --exclude='*~' \
+            ./ "dist/${SLUG}/"
+
+          # Restore README after *.md exclude (common plugin convention)
+          if [[ -f README.md ]]; then
+            cp README.md "dist/${SLUG}/README.md"
+          fi
+
+          (
+            cd dist
+            zip -r "../${SLUG}-${VERSION}.zip" "$SLUG"
+          )
+
+          echo "ZIP=$(pwd)/${SLUG}-${VERSION}.zip" >> "$GITHUB_ENV"
+          echo "Built ZIP:"
+          unzip -l "${SLUG}-${VERSION}.zip" | head -40
+
+      - name: Publish to Underdog Unlimited
+        env:
+          UU_PUBLISH_TOKEN: ${{ secrets.UU_PUBLISH_TOKEN }}
+          SLUG: ${{ inputs.plugin_slug }}
+          VERSION: ${{ inputs.version }}
+          PUBLISH_URL: ${{ inputs.publish_url }}
+          CHANGELOG: ${{ inputs.changelog }}
+        run: |
+          VERSION="${VERSION#v}"
+
+          if [[ -z "$UU_PUBLISH_TOKEN" ]]; then
+            echo "::error::Missing secret UU_PUBLISH_TOKEN"
+            exit 1
+          fi
+
+          PUBLISH_BASE="${PUBLISH_URL:-https://plugins.underdogunlimited.com}"
+          PUBLISH_BASE="${PUBLISH_BASE%/}"
+
+          printf '%s' "$CHANGELOG" > /tmp/changelog.txt
+
+          curl -fsS -X POST "${PUBLISH_BASE}/api/plugins/v1/${SLUG}/publish" \
+            -H "Authorization: Bearer ${UU_PUBLISH_TOKEN}" \
+            -F "version=${VERSION}" \
+            -F "changelog=</tmp/changelog.txt" \
+            -F "file=@${ZIP};type=application/zip"
+
+          echo "Published ${SLUG}@${VERSION} to ${PUBLISH_BASE}"
