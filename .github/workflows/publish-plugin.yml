@@ -8,6 +8,10 @@ name: Publish Plugin
 on:
   workflow_call:
     inputs:
+      target_environment:
+        description: "GitHub Environment name in the CALLER repo (staging or production) — used to resolve env-scoped secrets like UU_PUBLISH_TOKEN"
+        required: true
+        type: string
       plugin_slug:
         description: "UU Admin slug / ZIP folder name (e.g. player-management)"
         required: true
@@ -42,6 +46,7 @@ jobs:
   publish:
     name: Build & Publish
     runs-on: ubuntu-latest
+    environment: ${{ inputs.target_environment }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
