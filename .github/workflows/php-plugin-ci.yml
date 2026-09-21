@@ -1,7 +1,20 @@
 name: PHP Plugin CI
 
+# Usage from a calling workflow:
+#   jobs:
+#     ci:
+#       uses: legit-ninja/intersoccer-ci/.github/workflows/php-plugin-ci.yml@main
+#       with:
+#         php_version: '8.4'
+
 on:
   workflow_call:
+    inputs:
+      php_version:
+        description: 'PHP version to use for linting and tests'
+        type: string
+        required: false
+        default: '8.2'
 
 permissions:
   contents: read
@@ -24,7 +37,7 @@ jobs:
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
         with:
-          php-version: '8.2'
+          php-version: ${{ inputs.php_version }}
           coverage: none
 
       - name: Install Composer dependencies
@@ -110,7 +123,7 @@ jobs:
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
         with:
-          php-version: '8.2'
+          php-version: ${{ inputs.php_version }}
           coverage: none
 
       - name: Get Composer cache directory
