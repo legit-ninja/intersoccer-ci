@@ -89,6 +89,14 @@ jobs:
           echo "Validated: slug=$SLUG, bootstrap=$BOOTSTRAP, version=$VERSION"
         id: validate
 
+      - name: Setup PHP
+        if: ${{ hashFiles('composer.json') != '' && hashFiles('composer.lock') != '' }}
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          coverage: none
+          tools: composer:v2
+
       - name: Build plugin ZIP
         env:
           SLUG: ${{ inputs.plugin_slug }}
@@ -98,6 +106,8 @@ jobs:
           mkdir -p "dist/${SLUG}"
 
           # Exclude dev/CI artifacts; align with typical deploy.sh excludes
+          # Note: vendor/ is excluded here so we don't ship whatever is committed
+          # (may be incomplete or include dev deps). We install production deps below.
           rsync -a \
             --exclude='.git' \
             --exclude='.github' \
@@ -133,6 +143,53 @@ jobs:
           # Restore README after *.md exclude (common plugin convention)
           if [[ -f README.md ]]; then
             cp README.md "dist/${SLUG}/README.md"
+          fi
+
+          # Install production Composer dependencies if composer.json and composer.lock exist
+          if [[ -f composer.json && -f composer.lock ]]; then
+            echo "::group::Installing production Composer dependencies"
+            cp composer.json composer.lock "dist/${SLUG}/"
+            (
+              cd "dist/${SLUG}"
+              composer install --no-dev --optimize-autoloader --no-interaction --no-progress
+            )
+            echo "::endgroup::"
+
+            # Gate: autoload.php must exist after composer install
+            if [[ ! -f "dist/${SLUG}/vendor/autoload.php" ]]; then
+              echo "::error::Composer install failed: dist/${SLUG}/vendor/autoload.php is missing"
+              exit 1
+            fi
+            echo "✓ vendor/autoload.php present"
+
+            # Gate: check for dev dependency leakage in autoloader files
+            DEV_LEAK_PATTERN='deep-copy|phpunit|mockery|brain/monkey|yoast'
+            AUTOLOAD_FILES="dist/${SLUG}/vendor/composer/autoload_files.php"
+            AUTOLOAD_STATIC="dist/${SLUG}/vendor/composer/autoload_static.php"
+            LEAK_FOUND=0
+
+            if [[ -f "$AUTOLOAD_FILES" ]] && grep -qEi "$DEV_LEAK_PATTERN" "$AUTOLOAD_FILES"; then
+              echo "::error::Dev dependency leakage detected in autoload_files.php"
+              grep -Ei "$DEV_LEAK_PATTERN" "$AUTOLOAD_FILES" || true
+              LEAK_FOUND=1
+            fi
+
+            if [[ -f "$AUTOLOAD_STATIC" ]] && grep -qEi "$DEV_LEAK_PATTERN" "$AUTOLOAD_STATIC"; then
+              echo "::error::Dev dependency leakage detected in autoload_static.php"
+              grep -Ei "$DEV_LEAK_PATTERN" "$AUTOLOAD_STATIC" || true
+              LEAK_FOUND=1
+            fi
+
+            if [[ $LEAK_FOUND -eq 1 ]]; then
+              echo "::error::Production build contains dev dependencies. Check composer.json require-dev."
+              exit 1
+            fi
+            echo "✓ No dev dependency leakage detected"
+
+            # Remove composer.json/lock from staging dir (not needed in final ZIP)
+            rm -f "dist/${SLUG}/composer.json" "dist/${SLUG}/composer.lock"
+          else
+            echo "No composer.json + composer.lock at repo root; skipping Composer install"
           fi
 
           (
