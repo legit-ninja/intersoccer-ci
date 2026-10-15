@@ -103,50 +103,52 @@ jobs:
           VERSION="${VERSION#v}"
           mkdir -p "dist/${SLUG}"
 
-          # Root-anchored excludes so paths inside vendor/ are not stripped when
-          # include_vendor is true. Leading / = package root only.
+          # Exclude dev/CI artifacts; align with typical deploy.sh excludes.
+          # Same unanchored patterns as before (they match at any depth).
           RSYNC_EXCLUDES=(
-            --exclude='/.git'
-            --exclude='/.github'
-            --exclude='/.gitignore'
-            --exclude='/dist'
-            --exclude='/node_modules'
-            --exclude='/tests'
-            --exclude='/cypress'
-            --exclude='/docs'
-            --exclude='/coverage'
-            --exclude='/.phpunit.result.cache'
-            --exclude='/.taskfiles'
-            --exclude='/wp-admin'
-            --exclude='/composer.json'
-            --exclude='/composer.lock'
-            --exclude='/package.json'
-            --exclude='/package-lock.json'
-            --exclude='/phpunit.xml'
-            --exclude='/phpunit.xml.dist'
-            --exclude='/Taskfile.yaml'
-            --exclude='/*.log'
-            --exclude='/debug.log'
-            --exclude='/*.sh'
-            --exclude='/*.md'
-            --exclude='/*.list'
-            --exclude='/run-*.php'
-            --exclude='/.DS_Store'
-            --exclude='/*.swp'
-            --exclude='/*~'
+            --exclude='.git'
+            --exclude='.github'
+            --exclude='.gitignore'
+            --exclude='dist'
+            --exclude='node_modules'
+            --exclude='tests'
+            --exclude='cypress'
+            --exclude='docs'
+            --exclude='coverage'
+            --exclude='.phpunit.result.cache'
+            --exclude='.taskfiles'
+            --exclude='wp-admin'
+            --exclude='composer.json'
+            --exclude='composer.lock'
+            --exclude='package.json'
+            --exclude='package-lock.json'
+            --exclude='phpunit.xml'
+            --exclude='phpunit.xml.dist'
+            --exclude='Taskfile.yaml'
+            --exclude='*.log'
+            --exclude='debug.log'
+            --exclude='*.sh'
+            --exclude='*.md'
+            --exclude='*.list'
+            --exclude='run-*.php'
+            --exclude='.DS_Store'
+            --exclude='*.swp'
+            --exclude='*~'
           )
 
-          # Default: exclude /vendor (same as today). Opt-in: keep committed vendor/.
-          if [[ "${INCLUDE_VENDOR}" != "true" ]]; then
-            RSYNC_EXCLUDES+=(--exclude='/vendor')
-            echo "include_vendor=false: excluding /vendor from ZIP"
+          if [[ "${INCLUDE_VENDOR}" == "true" ]]; then
+            # rsync uses first matching rule, so this include must come before
+            # the excludes: everything under the top-level vendor/ is kept as-is.
+            RSYNC_FILTERS=(--include='/vendor/***' "${RSYNC_EXCLUDES[@]}")
+            echo "include_vendor=true: keeping committed vendor/ in ZIP (no composer install)"
           else
-            echo "include_vendor=true: keeping committed /vendor in ZIP (no composer install)"
+            RSYNC_FILTERS=("${RSYNC_EXCLUDES[@]}" --exclude='vendor')
+            echo "include_vendor=false: excluding vendor from ZIP"
           fi
 
-          rsync -a "${RSYNC_EXCLUDES[@]}" ./ "dist/${SLUG}/"
+          rsync -a "${RSYNC_FILTERS[@]}" ./ "dist/${SLUG}/"
 
-          # Restore README after /*.md exclude (common plugin convention)
+          # Restore README after *.md exclude (common plugin convention)
           if [[ -f README.md ]]; then
             cp README.md "dist/${SLUG}/README.md"
           fi
