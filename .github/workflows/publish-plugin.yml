@@ -39,6 +39,11 @@ on:
         required: false
         type: string
         default: "https://plugins.underdogunlimited.com"
+      include_vendor:
+        description: "If true, keep committed vendor/ in the publish ZIP. Default false excludes vendor/ (same as today). Use for plugins that commit vendor/ and must ship it (e.g. reports-rosters). Does not run composer install."
+        required: false
+        type: boolean
+        default: false
     secrets:
       UU_PUBLISH_TOKEN:
         description: "Publish token (udpub_…)"
@@ -93,44 +98,55 @@ jobs:
         env:
           SLUG: ${{ inputs.plugin_slug }}
           VERSION: ${{ inputs.version }}
+          INCLUDE_VENDOR: ${{ inputs.include_vendor }}
         run: |
           VERSION="${VERSION#v}"
           mkdir -p "dist/${SLUG}"
 
-          # Exclude dev/CI artifacts; align with typical deploy.sh excludes
-          rsync -a \
-            --exclude='.git' \
-            --exclude='.github' \
-            --exclude='.gitignore' \
-            --exclude='dist' \
-            --exclude='node_modules' \
-            --exclude='vendor' \
-            --exclude='tests' \
-            --exclude='cypress' \
-            --exclude='docs' \
-            --exclude='coverage' \
-            --exclude='.phpunit.result.cache' \
-            --exclude='.taskfiles' \
-            --exclude='wp-admin' \
-            --exclude='composer.json' \
-            --exclude='composer.lock' \
-            --exclude='package.json' \
-            --exclude='package-lock.json' \
-            --exclude='phpunit.xml' \
-            --exclude='phpunit.xml.dist' \
-            --exclude='Taskfile.yaml' \
-            --exclude='*.log' \
-            --exclude='debug.log' \
-            --exclude='*.sh' \
-            --exclude='*.md' \
-            --exclude='*.list' \
-            --exclude='run-*.php' \
-            --exclude='.DS_Store' \
-            --exclude='*.swp' \
-            --exclude='*~' \
-            ./ "dist/${SLUG}/"
+          # Root-anchored excludes so paths inside vendor/ are not stripped when
+          # include_vendor is true. Leading / = package root only.
+          RSYNC_EXCLUDES=(
+            --exclude='/.git'
+            --exclude='/.github'
+            --exclude='/.gitignore'
+            --exclude='/dist'
+            --exclude='/node_modules'
+            --exclude='/tests'
+            --exclude='/cypress'
+            --exclude='/docs'
+            --exclude='/coverage'
+            --exclude='/.phpunit.result.cache'
+            --exclude='/.taskfiles'
+            --exclude='/wp-admin'
+            --exclude='/composer.json'
+            --exclude='/composer.lock'
+            --exclude='/package.json'
+            --exclude='/package-lock.json'
+            --exclude='/phpunit.xml'
+            --exclude='/phpunit.xml.dist'
+            --exclude='/Taskfile.yaml'
+            --exclude='/*.log'
+            --exclude='/debug.log'
+            --exclude='/*.sh'
+            --exclude='/*.md'
+            --exclude='/*.list'
+            --exclude='/run-*.php'
+            --exclude='/.DS_Store'
+            --exclude='/*.swp'
+            --exclude='/*~'
+          )
 
-          # Restore README after *.md exclude (common plugin convention)
+          # Default: exclude /vendor (same as today). Opt-in: keep committed vendor/.
+          if [[ "${INCLUDE_VENDOR}" != "true" ]]; then
+            RSYNC_EXCLUDES+=(--exclude='/vendor')
+            echo "include_vendor=false: excluding /vendor from ZIP"
+          else
+            echo "include_vendor=true: keeping committed /vendor in ZIP (no composer install)"
+          fi
+
+          rsync -a "${RSYNC_EXCLUDES[@]}" ./ "dist/${SLUG}/"
+
+          # Restore README after /*.md exclude (common plugin convention)
           if [[ -f README.md ]]; then
             cp README.md "dist/${SLUG}/README.md"
           fi
