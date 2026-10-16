@@ -89,6 +89,18 @@ jobs:
           echo "Validated: slug=$SLUG, bootstrap=$BOOTSTRAP, version=$VERSION"
         id: validate
 
+      - name: Check version is three-part
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          # UU rejects four-part versions like 2.10.15.1, so fail here before the ZIP build.
+          VERSION="${VERSION#v}"
+          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::UU only accepts three-part versions (X.Y.Z or X.Y.Z-prerelease)"
+            exit 1
+          fi
+          echo "Version $VERSION is three-part"
+
       - name: Build plugin ZIP
         env:
           SLUG: ${{ inputs.plugin_slug }}
