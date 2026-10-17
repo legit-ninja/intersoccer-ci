@@ -104,7 +104,8 @@ jobs:
           mkdir -p "dist/${SLUG}"
 
           # Exclude dev/CI artifacts; align with typical deploy.sh excludes.
-          # Same unanchored patterns as before (they match at any depth).
+          # Patterns without a leading slash match at any depth. Patterns with
+          # a leading slash only match at the plugin root.
           RSYNC_EXCLUDES=(
             --exclude='.git'
             --exclude='.github'
@@ -128,7 +129,8 @@ jobs:
             --exclude='*.log'
             --exclude='debug.log'
             --exclude='*.sh'
-            --exclude='*.md'
+            # Root only, so licence/readme files of bundled libraries are kept.
+            --exclude='/*.md'
             --exclude='*.list'
             --exclude='run-*.php'
             --exclude='.DS_Store'
@@ -136,19 +138,24 @@ jobs:
             --exclude='*~'
           )
 
+          # rsync applies the first rule that matches, so includes go first.
+          # Self-hosted assets in nested vendor folders (for example
+          # js/vendor/ or css/vendor/) always ship whole, licence files included.
+          RSYNC_FILTERS=(--include='*/vendor/***')
+
           if [[ "${INCLUDE_VENDOR}" == "true" ]]; then
-            # rsync uses first matching rule, so this include must come before
-            # the excludes: everything under the top-level vendor/ is kept as-is.
-            RSYNC_FILTERS=(--include='/vendor/***' "${RSYNC_EXCLUDES[@]}")
+            # Keep the committed top-level Composer vendor/ as-is.
+            RSYNC_FILTERS+=(--include='/vendor/***' "${RSYNC_EXCLUDES[@]}")
             echo "include_vendor=true: keeping committed vendor/ in ZIP (no composer install)"
           else
-            RSYNC_FILTERS=("${RSYNC_EXCLUDES[@]}" --exclude='vendor')
-            echo "include_vendor=false: excluding vendor from ZIP"
+            # Only the top-level Composer vendor/ is dropped, not nested ones.
+            RSYNC_FILTERS+=("${RSYNC_EXCLUDES[@]}" --exclude='/vendor')
+            echo "include_vendor=false: excluding top-level vendor/ from ZIP"
           fi
 
           rsync -a "${RSYNC_FILTERS[@]}" ./ "dist/${SLUG}/"
 
-          # Restore README after *.md exclude (common plugin convention)
+          # Restore README after the root *.md exclude (common plugin convention)
           if [[ -f README.md ]]; then
             cp README.md "dist/${SLUG}/README.md"
           fi
@@ -160,7 +167,104 @@ jobs:
 
           echo "ZIP=$(pwd)/${SLUG}-${VERSION}.zip" >> "$GITHUB_ENV"
           echo "Built ZIP:"
-          unzip -l "${SLUG}-${VERSION}.zip" | head -40
+          # sed reads all input, so a large listing cannot trip pipefail the
+          # way head would.
+          unzip -l "${SLUG}-${VERSION}.zip" | sed -n '1,40p'
+
+      - name: Check ZIP contents
+        env:
+          SLUG: ${{ inputs.plugin_slug }}
+          INCLUDE_VENDOR: ${{ inputs.include_vendor }}
+        run: |
+          # Fail before publishing if packaging dropped files that must ship.
+          # Generic: works from the repo's own file list, no plugin paths.
+          if [[ -z "${ZIP:-}" || ! -f "${ZIP}" ]]; then
+            echo "::error::Built ZIP not found (ZIP=${ZIP:-unset})"
+            exit 1
+          fi
+
+          # Byte-order sorting so sort and comm agree.
+          export LC_ALL=C
+          WORK="$(mktemp -d)"
+
+          # ZIP entries relative to the plugin folder.
+          unzip -Z1 "$ZIP" \
+            | awk -v p="${SLUG}/" 'index($0, p) == 1 { print substr($0, length(p) + 1) }' \
+            | sort -u > "$WORK/zip.txt"
+
+          # Source files: tracked files from the checkout.
+          git -c core.quotePath=false ls-files | sort -u > "$WORK/src.txt"
+          if [[ ! -s "$WORK/src.txt" ]]; then
+            echo "::error::Could not list source files with git ls-files"
+            exit 1
+          fi
+
+          # 1) Every file under a nested vendor folder (anything like
+          #    <dir>/vendor/..., outside the top-level vendor/) must be in the
+          #    ZIP, as long as <dir> itself ships. Folders that are dropped on
+          #    purpose (tests/, docs/, ...) are skipped.
+          awk '
+            FNR == NR {
+              p = $0
+              isdir = sub(/\/$/, "", p)
+              if (p == "") next
+              inzip[p] = 1
+              if (isdir) dirs[p] = 1
+              while ((j = match(p, /\/[^\/]*$/)) > 0) {
+                p = substr(p, 1, j - 1)
+                dirs[p] = 1
+              }
+              next
+            }
+            /^vendor\// { next }
+            {
+              i = index($0, "/vendor/")
+              if (i == 0) next
+              parent = substr($0, 1, i - 1)
+              if (!(parent in dirs)) { skipped++; next }
+              base = $0
+              sub(/.*\//, "", base)
+              ub = toupper(base)
+              islic = (ub ~ /^LICEN[CS]E/ || ub ~ /\.MD$/)
+              checked++
+              if (islic) lic++
+              if (!($0 in inzip)) print (islic ? "licence" : "file") "\t" $0
+            }
+            END {
+              printf "nested vendor files checked: %d (licence/readme: %d), skipped (parent folder not shipped): %d\n", checked, lic, skipped > "/dev/stderr"
+            }
+          ' "$WORK/zip.txt" "$WORK/src.txt" > "$WORK/missing.tsv"
+
+          FAILED=0
+          if [[ -s "$WORK/missing.tsv" ]]; then
+            FAILED=1
+            echo "::error::$(wc -l < "$WORK/missing.tsv") file(s) under nested vendor folders are missing from the ZIP"
+            while IFS=$'\t' read -r kind path; do
+              echo "::error::Missing ${kind} from ZIP: ${path}"
+            done < <(head -n 50 "$WORK/missing.tsv")
+          fi
+
+          # 2) Top-level Composer vendor/ must follow include_vendor.
+          ZIP_VENDOR_COUNT="$(grep -c '^vendor/' "$WORK/zip.txt" || true)"
+          if [[ "${INCLUDE_VENDOR}" == "true" ]]; then
+            grep '^vendor/' "$WORK/src.txt" > "$WORK/src-vendor.txt" || true
+            comm -23 "$WORK/src-vendor.txt" "$WORK/zip.txt" > "$WORK/missing-vendor.txt"
+            MISSING_VENDOR="$(wc -l < "$WORK/missing-vendor.txt")"
+            if [[ "$MISSING_VENDOR" -gt 0 ]]; then
+              FAILED=1
+              echo "::error::include_vendor=true but ${MISSING_VENDOR} committed vendor/ file(s) are missing from the ZIP"
+              sed -n '1,20s/^/::error::Missing vendor file: /p' "$WORK/missing-vendor.txt"
+            fi
+          elif [[ "$ZIP_VENDOR_COUNT" -gt 0 ]]; then
+            FAILED=1
+            echo "::error::include_vendor=false but the ZIP contains a top-level vendor/ (${ZIP_VENDOR_COUNT} entries)"
+          fi
+
+          if [[ "$FAILED" -ne 0 ]]; then
+            echo "ZIP content check failed; not publishing."
+            exit 1
+          fi
+          echo "ZIP content check passed (top-level vendor/ entries: ${ZIP_VENDOR_COUNT}, include_vendor=${INCLUDE_VENDOR})."
 
       - name: Publish to Underdog Unlimited
         env:
