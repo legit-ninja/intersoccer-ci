@@ -106,6 +106,28 @@ jobs:
           fi
           echo "Version $VERSION is three-part"
 
+      - name: Check for stray plugin headers
+        env:
+          BOOTSTRAP: ${{ inputs.bootstrap_php }}
+        run: |
+          # Only the main plugin file may carry a "Plugin Name:" header. A second
+          # header makes WordPress list a second plugin and has broken installs.
+          # Same pattern WordPress uses (header line, optional comment chars).
+          STRAY="$(find . -type f -name '*.php' \
+            -not -path './.git/*' \
+            -not -path '*/vendor/*' \
+            -not -path '*/node_modules/*' \
+            -not -path "./${BOOTSTRAP}" \
+            -exec grep -liE '^[[:space:]/*#@]*Plugin Name[[:space:]]*:' {} + || true)"
+          if [[ -n "$STRAY" ]]; then
+            while IFS= read -r f; do
+              echo "::error file=${f#./}::Stray 'Plugin Name:' header (only ${BOOTSTRAP} may have one)"
+            done <<< "$STRAY"
+            echo "Found $(wc -l <<< "$STRAY") PHP file(s) besides ${BOOTSTRAP} with a 'Plugin Name:' header; not publishing."
+            exit 1
+          fi
+          echo "Plugin header check passed: only ${BOOTSTRAP} has a 'Plugin Name:' header."
+
       - name: Build plugin ZIP
         env:
           SLUG: ${{ inputs.plugin_slug }}

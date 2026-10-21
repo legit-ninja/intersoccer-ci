@@ -55,6 +55,7 @@ Reusable workflow for publishing WordPress plugin ZIPs to [Underdog Unlimited](h
 
 **Requirements:**
 - Bootstrap PHP file must exist at repo root
+- Only the bootstrap PHP file may contain a `Plugin Name:` header. The build fails if any other PHP file has one (`vendor/` and `node_modules/` are skipped), because a stray header shows up as a second plugin and has broken installs
 - Caller handles trigger (`on: release`, `workflow_dispatch`) and computes version
 
 ## Usage
