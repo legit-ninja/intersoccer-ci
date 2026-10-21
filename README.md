@@ -46,12 +46,19 @@ Reusable workflow for publishing WordPress plugin ZIPs to [Underdog Unlimited](h
 | `bootstrap_php` | Yes | Main plugin PHP filename at repo root (e.g. `player-management.php`) |
 | `version` | Yes | Version to publish (e.g. `2.7.20` or `2.7.20-rc3`, without leading `v`) |
 | `changelog` | No | Release notes / changelog text |
+| `target_environment` | Yes | GitHub Environment in the caller repo (`staging` or `production`); selects env-scoped secrets |
 | `publish_url` | No | Publish base URL (default: `https://plugins.underdogunlimited.com`) |
+| `channel` | No | `release`, `prerelease` or `dev`. Empty: inferred from the version (`X.Y.Z` → release, `-rc` → prerelease, other suffix → dev). When `target_environment` is `staging`, `release` is changed to `prerelease` |
 
 **Secrets:**
 | Secret | Required | Description |
 |--------|----------|-------------|
 | `UU_PUBLISH_TOKEN` | Yes | Publish token (`udpub_…`) |
+
+**Channels and "latest":**
+- In Underdog Unlimited, `latest` on a channel means the **most recently published** version, not the highest version number. Publishing 2.10.15 after 2.10.20 makes 2.10.15 the latest on that channel.
+- Staging publishes always go to `prerelease` (never `release`), so a staging build cannot become the release-channel latest that production sites update to.
+- Publish to `release` in version order, and only from the production environment.
 
 **Requirements:**
 - Bootstrap PHP file must exist at repo root
