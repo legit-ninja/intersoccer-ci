@@ -30,7 +30,7 @@ on:
         type: string
         default: ""
       channel:
-        description: "Publish channel: release|prerelease|dev. Leave empty to infer from version (X.Y.Z→release, -rc→prerelease, other suffix→dev)."
+        description: "Publish channel: release|prerelease|dev. Leave empty to infer from version (X.Y.Z→release, -rc→prerelease, other suffix→dev). When target_environment is staging, release is changed to prerelease."
         required: false
         type: string
         default: ""
@@ -286,6 +286,7 @@ jobs:
           PUBLISH_URL: ${{ inputs.publish_url }}
           CHANGELOG: ${{ inputs.changelog }}
           CHANNEL_INPUT: ${{ inputs.channel }}
+          TARGET_ENV: ${{ inputs.target_environment }}
         run: |
           VERSION="${VERSION#v}"
 
@@ -315,6 +316,14 @@ jobs:
           else
             CHANNEL="$(infer_channel "$VERSION")"
             echo "Inferred channel from version '$VERSION': $CHANNEL"
+          fi
+
+          # Staging must never land on the release channel: UU serves "latest" from
+          # the most recently published release, so a staging upload there could
+          # be served to production sites. Force prerelease instead.
+          if [[ "${TARGET_ENV,,}" == "staging" && "$CHANNEL" == "release" ]]; then
+            echo "::warning::target_environment is staging, so channel release is changed to prerelease"
+            CHANNEL="prerelease"
           fi
 
           printf '%s' "$CHANGELOG" > /tmp/changelog.txt
