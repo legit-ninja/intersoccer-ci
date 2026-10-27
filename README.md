@@ -46,6 +46,7 @@ Reusable workflow for publishing WordPress plugin or theme ZIPs to the Underdog 
 | `bootstrap_php` | Yes | Main plugin PHP filename at repo root (e.g. `player-management.php`) |
 | `version` | Yes | Version to publish (e.g. `2.7.20` or `2.7.20-rc3`, without leading `v`) |
 | `changelog` | No | Release notes / changelog text |
+| `package_type` | No | `plugin` (default) or `theme` — themes require `style.css` `Version:` to match; plugins require bootstrap `Version:` to match |
 | `publish_url` | No* | Publish base URL (`https://` only). Callers should pass `${{ vars.UU_PUBLISH_URL }}`; the workflow fails if empty. |
 
 **Secrets:**

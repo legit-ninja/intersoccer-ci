@@ -43,6 +43,11 @@ on:
         required: false
         type: boolean
         default: false
+      package_type:
+        description: "Package kind: plugin or theme (default plugin)"
+        required: false
+        type: string
+        default: "plugin"
     secrets:
       UU_PUBLISH_TOKEN:
         description: "Publish token (udpub_…)"
@@ -65,6 +70,7 @@ jobs:
           SLUG: ${{ inputs.plugin_slug }}
           BOOTSTRAP: ${{ inputs.bootstrap_php }}
           VERSION: ${{ inputs.version }}
+          PACKAGE_TYPE: ${{ inputs.package_type }}
         run: |
           if [[ -z "$SLUG" ]]; then
             echo "::error::plugin_slug input is required"
@@ -82,6 +88,11 @@ jobs:
             echo "::error::version input is required"
             exit 1
           fi
+          PKG_TYPE="$(echo "${PACKAGE_TYPE:-plugin}" | tr '[:upper:]' '[:lower:]' | xargs)"
+          if [[ "$PKG_TYPE" != "plugin" && "$PKG_TYPE" != "theme" ]]; then
+            echo "::error::package_type must be plugin or theme (got: ${PACKAGE_TYPE})"
+            exit 1
+          fi
           # Strip leading v if caller passed one
           VERSION="${VERSION#v}"
           # Validate version format: semver with optional fourth segment and prerelease
@@ -89,8 +100,29 @@ jobs:
             echo "::error::Version must look like 1.2.3, 1.2.3.1, or 1.2.3-rc1 (got: $VERSION)"
             exit 1
           fi
+          read_header_version() {
+            local file="$1"
+            grep -iE '^[ \t*]*Version:' "$file" | head -n1 | sed -E 's/^[ \t*]*Version:[ \t]*//; s/[ \t]*$//'
+          }
+          if [[ "$PKG_TYPE" == "theme" ]]; then
+            if [[ ! -f style.css ]]; then
+              echo "::error::style.css not found at repo root (required for theme package_type)"
+              exit 1
+            fi
+            HEADER_VER="$(read_header_version style.css)"
+          else
+            HEADER_VER="$(read_header_version "$BOOTSTRAP")"
+          fi
+          if [[ -z "$HEADER_VER" ]]; then
+            echo "::error::Could not read Version header from package metadata"
+            exit 1
+          fi
+          if [[ "$HEADER_VER" != "$VERSION" ]]; then
+            echo "::error::Version header (${HEADER_VER}) does not match publish version (${VERSION})"
+            exit 1
+          fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "Validated: slug=$SLUG, bootstrap=$BOOTSTRAP, version=$VERSION"
+          echo "Validated: slug=$SLUG, bootstrap=$BOOTSTRAP, version=$VERSION, package_type=$PKG_TYPE"
         id: validate
 
       - name: Check version is three-part
