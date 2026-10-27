@@ -154,6 +154,9 @@ jobs:
             --exclude='.github'
             --exclude='.gitignore'
             --exclude='.env*'
+            --exclude='.vscode'
+            --exclude='.idea'
+            --exclude='auth.json'
             --exclude='*.map'
             --exclude='*.sql'
             --exclude='dist'
@@ -232,7 +235,7 @@ jobs:
           FORBIDDEN=0
           while IFS= read -r entry; do
             base="${entry##*/}"
-            if [[ "$base" == .env* ]] || [[ "$entry" == */.git/* ]] || [[ "$entry" == */.git ]] || [[ "$base" == *.sql ]] || [[ "$base" == *.map ]]; then
+            if [[ "$base" == .env* ]] || [[ "$entry" == */.git/* ]] || [[ "$entry" == */.git ]] || [[ "$base" == *.sql ]] || [[ "$base" == *.map ]] || [[ "$entry" == */.vscode/* ]] || [[ "$entry" == */.vscode ]] || [[ "$entry" == */.idea/* ]] || [[ "$entry" == */.idea ]] || [[ "$base" == auth.json ]]; then
               echo "::error::Forbidden path in ZIP: ${entry}"
               FORBIDDEN=1
             fi
