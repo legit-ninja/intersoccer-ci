@@ -35,10 +35,9 @@ on:
         type: string
         default: ""
       publish_url:
-        description: "Underdog Unlimited publish base URL"
+        description: "Underdog Unlimited publish base URL (https only; set via caller vars.UU_PUBLISH_URL)"
         required: false
         type: string
-        default: "https://plugins.underdogunlimited.com"
       include_vendor:
         description: "If true, keep committed vendor/ in the publish ZIP. Default false excludes vendor/ (same as today). Use for plugins that commit vendor/ and must ship it (e.g. reports-rosters). Does not run composer install."
         required: false
@@ -294,8 +293,15 @@ jobs:
             exit 1
           fi
 
-          PUBLISH_BASE="${PUBLISH_URL:-https://plugins.underdogunlimited.com}"
-          PUBLISH_BASE="${PUBLISH_BASE%/}"
+          if [[ -z "${PUBLISH_URL// }" ]]; then
+            echo "::error::publish_url input is required (set repository or environment variable UU_PUBLISH_URL on the caller)"
+            exit 1
+          fi
+          PUBLISH_BASE="${PUBLISH_URL%/}"
+          if [[ ! "$PUBLISH_BASE" =~ ^https:// ]]; then
+            echo "::error::publish_url must start with https://"
+            exit 1
+          fi
 
           # Determine channel: use input if valid, otherwise infer from version
           infer_channel() {

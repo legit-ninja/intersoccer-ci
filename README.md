@@ -34,7 +34,7 @@ Lightweight smoke test for the child theme repository.
 
 ### publish-plugin.yml
 
-Reusable workflow for publishing WordPress plugin ZIPs to [Underdog Unlimited](https://plugins.underdogunlimited.com).
+Reusable workflow for publishing WordPress plugin or theme ZIPs to the Underdog Unlimited publish API.
 
 **Jobs:**
 - **publish** — Builds a distributable ZIP (excluding `.git`, `.github`, `tests`, `vendor`, dev artifacts) and POSTs it to the Underdog Unlimited publish API
@@ -46,7 +46,7 @@ Reusable workflow for publishing WordPress plugin ZIPs to [Underdog Unlimited](h
 | `bootstrap_php` | Yes | Main plugin PHP filename at repo root (e.g. `player-management.php`) |
 | `version` | Yes | Version to publish (e.g. `2.7.20` or `2.7.20-rc3`, without leading `v`) |
 | `changelog` | No | Release notes / changelog text |
-| `publish_url` | No | Publish base URL (default: `https://plugins.underdogunlimited.com`) |
+| `publish_url` | No* | Publish base URL (`https://` only). Callers should pass `${{ vars.UU_PUBLISH_URL }}`; the workflow fails if empty. |
 
 **Secrets:**
 | Secret | Required | Description |
@@ -120,6 +120,7 @@ jobs:
       bootstrap_php: player-management.php
       version: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.version || github.ref_name }}
       changelog: ${{ github.event.release.body || '' }}
+      publish_url: ${{ vars.UU_PUBLISH_URL }}
     secrets:
       UU_PUBLISH_TOKEN: ${{ secrets.UU_PUBLISH_TOKEN }}
 ```
