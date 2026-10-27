@@ -121,6 +121,9 @@ jobs:
             --exclude='.git'
             --exclude='.github'
             --exclude='.gitignore'
+            --exclude='.env*'
+            --exclude='*.map'
+            --exclude='*.sql'
             --exclude='dist'
             --exclude='node_modules'
             --exclude='tests'
@@ -191,6 +194,19 @@ jobs:
           # Generic: works from the repo's own file list, no plugin paths.
           if [[ -z "${ZIP:-}" || ! -f "${ZIP}" ]]; then
             echo "::error::Built ZIP not found (ZIP=${ZIP:-unset})"
+            exit 1
+          fi
+
+          FORBIDDEN=0
+          while IFS= read -r entry; do
+            base="${entry##*/}"
+            if [[ "$base" == .env* ]] || [[ "$entry" == */.git/* ]] || [[ "$entry" == */.git ]] || [[ "$base" == *.sql ]] || [[ "$base" == *.map ]]; then
+              echo "::error::Forbidden path in ZIP: ${entry}"
+              FORBIDDEN=1
+            fi
+          done < <(unzip -Z1 "$ZIP")
+          if [[ "$FORBIDDEN" -ne 0 ]]; then
+            echo "ZIP contains forbidden paths; not publishing."
             exit 1
           fi
 
