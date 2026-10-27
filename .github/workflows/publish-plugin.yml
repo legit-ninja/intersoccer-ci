@@ -35,15 +35,19 @@ on:
         type: string
         default: ""
       publish_url:
-        description: "Underdog Unlimited publish base URL"
+        description: "Underdog Unlimited publish base URL (https only; set via caller vars.UU_PUBLISH_URL)"
         required: false
         type: string
-        default: "https://plugins.underdogunlimited.com"
       include_vendor:
         description: "If true, keep committed vendor/ in the publish ZIP. Default false excludes vendor/ (same as today). Use for plugins that commit vendor/ and must ship it (e.g. reports-rosters). Does not run composer install."
         required: false
         type: boolean
         default: false
+      package_type:
+        description: "Package kind: plugin or theme (default plugin)"
+        required: false
+        type: string
+        default: "plugin"
     secrets:
       UU_PUBLISH_TOKEN:
         description: "Publish token (udpub_…)"
@@ -59,13 +63,14 @@ jobs:
     environment: ${{ inputs.target_environment }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Validate inputs
         env:
           SLUG: ${{ inputs.plugin_slug }}
           BOOTSTRAP: ${{ inputs.bootstrap_php }}
           VERSION: ${{ inputs.version }}
+          PACKAGE_TYPE: ${{ inputs.package_type }}
         run: |
           if [[ -z "$SLUG" ]]; then
             echo "::error::plugin_slug input is required"
@@ -83,22 +88,48 @@ jobs:
             echo "::error::version input is required"
             exit 1
           fi
+          PKG_TYPE="$(echo "${PACKAGE_TYPE:-plugin}" | tr '[:upper:]' '[:lower:]' | xargs)"
+          if [[ "$PKG_TYPE" != "plugin" && "$PKG_TYPE" != "theme" ]]; then
+            echo "::error::package_type must be plugin or theme (got: ${PACKAGE_TYPE})"
+            exit 1
+          fi
           # Strip leading v if caller passed one
           VERSION="${VERSION#v}"
           # Validate version format: semver with optional fourth segment and prerelease
           if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(\.[0-9]+)?([-+][A-Za-z0-9.-]+)?$ ]]; then
-            echo "::error::Version must look like 1.2.3, 1.2.3.1, or 1.2.3-rc1 (got: $VERSION)"
+            echo "::error::Version must look like X.Y.Z or X.Y.Z-prerelease (got: $VERSION)"
+            exit 1
+          fi
+          read_header_version() {
+            local file="$1"
+            grep -iE '^[ \t*]*Version:' "$file" | head -n1 | sed -E 's/^[ \t*]*Version:[ \t]*//; s/[ \t]*$//'
+          }
+          if [[ "$PKG_TYPE" == "theme" ]]; then
+            if [[ ! -f style.css ]]; then
+              echo "::error::style.css not found at repo root (required for theme package_type)"
+              exit 1
+            fi
+            HEADER_VER="$(read_header_version style.css)"
+          else
+            HEADER_VER="$(read_header_version "$BOOTSTRAP")"
+          fi
+          if [[ -z "$HEADER_VER" ]]; then
+            echo "::error::Could not read Version header from package metadata"
+            exit 1
+          fi
+          if [[ "$HEADER_VER" != "$VERSION" ]]; then
+            echo "::error::Version header (${HEADER_VER}) does not match publish version (${VERSION})"
             exit 1
           fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "Validated: slug=$SLUG, bootstrap=$BOOTSTRAP, version=$VERSION"
+          echo "Validated: slug=$SLUG, bootstrap=$BOOTSTRAP, version=$VERSION, package_type=$PKG_TYPE"
         id: validate
 
       - name: Check version is three-part
         env:
           VERSION: ${{ inputs.version }}
         run: |
-          # UU rejects four-part versions like 2.10.15.1, so fail here before the ZIP build.
+          # UU rejects four-segment versions, so fail here before the ZIP build.
           VERSION="${VERSION#v}"
           if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
             echo "::error::UU only accepts three-part versions (X.Y.Z or X.Y.Z-prerelease)"
@@ -122,6 +153,12 @@ jobs:
             --exclude='.git'
             --exclude='.github'
             --exclude='.gitignore'
+            --exclude='.env*'
+            --exclude='.vscode'
+            --exclude='.idea'
+            --exclude='auth.json'
+            --exclude='*.map'
+            --exclude='*.sql'
             --exclude='dist'
             --exclude='node_modules'
             --exclude='tests'
@@ -192,6 +229,19 @@ jobs:
           # Generic: works from the repo's own file list, no plugin paths.
           if [[ -z "${ZIP:-}" || ! -f "${ZIP}" ]]; then
             echo "::error::Built ZIP not found (ZIP=${ZIP:-unset})"
+            exit 1
+          fi
+
+          FORBIDDEN=0
+          while IFS= read -r entry; do
+            base="${entry##*/}"
+            if [[ "$base" == .env* ]] || [[ "$entry" == */.git/* ]] || [[ "$entry" == */.git ]] || [[ "$base" == *.sql ]] || [[ "$base" == *.map ]] || [[ "$entry" == */.vscode/* ]] || [[ "$entry" == */.vscode ]] || [[ "$entry" == */.idea/* ]] || [[ "$entry" == */.idea ]] || [[ "$base" == auth.json ]]; then
+              echo "::error::Forbidden path in ZIP: ${entry}"
+              FORBIDDEN=1
+            fi
+          done < <(unzip -Z1 "$ZIP")
+          if [[ "$FORBIDDEN" -ne 0 ]]; then
+            echo "ZIP contains forbidden paths; not publishing."
             exit 1
           fi
 
@@ -294,8 +344,15 @@ jobs:
             exit 1
           fi
 
-          PUBLISH_BASE="${PUBLISH_URL:-https://plugins.underdogunlimited.com}"
-          PUBLISH_BASE="${PUBLISH_BASE%/}"
+          if [[ -z "${PUBLISH_URL// }" ]]; then
+            echo "::error::publish_url input is required (set repository or environment variable UU_PUBLISH_URL on the caller)"
+            exit 1
+          fi
+          PUBLISH_BASE="${PUBLISH_URL%/}"
+          if [[ ! "$PUBLISH_BASE" =~ ^https:// ]]; then
+            echo "::error::publish_url must start with https://"
+            exit 1
+          fi
 
           # Determine channel: use input if valid, otherwise infer from version
           infer_channel() {
