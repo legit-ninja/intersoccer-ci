@@ -55,7 +55,7 @@ on:
         required: true
       UU_PUBLISH_URL:
         description: "Underdog Unlimited publish base URL (https only). Pass from the caller as a secret, not a variable, so it is masked in logs. An environment secret of the same name on target_environment takes precedence."
-        required: false
+        required: true
 
 permissions:
   contents: read
@@ -68,6 +68,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
 
       - name: Validate inputs
         env:

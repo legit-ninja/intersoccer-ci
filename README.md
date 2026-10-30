@@ -53,7 +53,7 @@ Reusable workflow for publishing WordPress plugin or theme ZIPs to the Underdog 
 | Secret | Required | Description |
 |--------|----------|-------------|
 | `UU_PUBLISH_TOKEN` | Yes | Publish token (`udpub_…`) |
-| `UU_PUBLISH_URL` | Yes* | Publish base URL (`https://` only). Pass it as a secret so it is masked in logs; the workflow fails if it is empty. An environment secret with the same name on `target_environment` takes precedence. |
+| `UU_PUBLISH_URL` | Yes | Publish base URL (`https://` only). Pass it as a secret so it is masked in logs; the workflow fails if it is empty. An environment secret with the same name on `target_environment` takes precedence. |
 
 **Requirements:**
 - Bootstrap PHP file must exist at repo root
