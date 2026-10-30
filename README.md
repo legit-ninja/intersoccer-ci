@@ -47,12 +47,13 @@ Reusable workflow for publishing WordPress plugin or theme ZIPs to the Underdog 
 | `version` | Yes | Version to publish (e.g. `2.7.20` or `2.7.20-rc3`, without leading `v`) |
 | `changelog` | No | Release notes / changelog text |
 | `package_type` | No | `plugin` (default) or `theme` — themes require `style.css` `Version:` to match; plugins require bootstrap `Version:` to match |
-| `publish_url` | No* | Publish base URL (`https://` only). Callers should pass `${{ vars.UU_PUBLISH_URL }}`; the workflow fails if empty. |
+| `publish_url` | No | Deprecated and ignored (a warning is logged if set). Pass the URL as secret `UU_PUBLISH_URL` instead. |
 
 **Secrets:**
 | Secret | Required | Description |
 |--------|----------|-------------|
 | `UU_PUBLISH_TOKEN` | Yes | Publish token (`udpub_…`) |
+| `UU_PUBLISH_URL` | Yes | Publish base URL (`https://` only). Pass it as a secret so it is masked in logs; the workflow fails if it is empty. An environment secret with the same name on `target_environment` takes precedence. |
 
 **Requirements:**
 - Bootstrap PHP file must exist at repo root
@@ -121,15 +122,15 @@ jobs:
       bootstrap_php: player-management.php
       version: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.version || github.ref_name }}
       changelog: ${{ github.event.release.body || '' }}
-      publish_url: ${{ vars.UU_PUBLISH_URL }}
     secrets:
       UU_PUBLISH_TOKEN: ${{ secrets.UU_PUBLISH_TOKEN }}
+      UU_PUBLISH_URL: ${{ secrets.UU_PUBLISH_URL }}
 ```
 
 **Notes on the caller:**
 - The caller computes `version` from the release tag (`github.ref_name`) or manual input
 - `changelog` is pulled from the GitHub release body when available
-- Add the `UU_PUBLISH_TOKEN` secret to your repository (or use GitHub Environments for staging/production separation)
+- Add the `UU_PUBLISH_TOKEN` and `UU_PUBLISH_URL` secrets to your repository (or use GitHub Environments for staging/production separation)
 - The reusable workflow strips any leading `v` from the version automatically
 
 ## Notes

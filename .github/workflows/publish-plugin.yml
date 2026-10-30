@@ -35,9 +35,10 @@ on:
         type: string
         default: ""
       publish_url:
-        description: "Underdog Unlimited publish base URL (https only; set via caller vars.UU_PUBLISH_URL)"
+        description: "DEPRECATED and ignored. Pass the publish base URL as secret UU_PUBLISH_URL instead. Kept only so older callers do not fail on an unknown input."
         required: false
         type: string
+        default: ""
       include_vendor:
         description: "If true, keep committed vendor/ in the publish ZIP. Default false excludes vendor/ (same as today). Use for plugins that commit vendor/ and must ship it (e.g. reports-rosters). Does not run composer install."
         required: false
@@ -52,6 +53,9 @@ on:
       UU_PUBLISH_TOKEN:
         description: "Publish token (udpub_…)"
         required: true
+      UU_PUBLISH_URL:
+        description: "Underdog Unlimited publish base URL (https only). Pass from the caller as a secret, not a variable, so it is masked in logs. An environment secret of the same name on target_environment takes precedence."
+        required: true
 
 permissions:
   contents: read
@@ -64,6 +68,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
 
       - name: Validate inputs
         env:
@@ -333,7 +339,8 @@ jobs:
           UU_PUBLISH_TOKEN: ${{ secrets.UU_PUBLISH_TOKEN }}
           SLUG: ${{ inputs.plugin_slug }}
           VERSION: ${{ inputs.version }}
-          PUBLISH_URL: ${{ inputs.publish_url }}
+          PUBLISH_URL: ${{ secrets.UU_PUBLISH_URL }}
+          LEGACY_PUBLISH_URL_INPUT: ${{ inputs.publish_url != '' }}
           CHANGELOG: ${{ inputs.changelog }}
           CHANNEL_INPUT: ${{ inputs.channel }}
         run: |
@@ -344,13 +351,29 @@ jobs:
             exit 1
           fi
 
+          # Never trace this step: the URL and token must not reach the log.
+          set +x
+
+          if [[ "$LEGACY_PUBLISH_URL_INPUT" == "true" ]]; then
+            echo "::warning::The publish_url input is deprecated and ignored; pass secret UU_PUBLISH_URL instead."
+          fi
+
           if [[ -z "${PUBLISH_URL// }" ]]; then
-            echo "::error::publish_url input is required (set repository or environment variable UU_PUBLISH_URL on the caller)"
+            echo "::error::Missing secret UU_PUBLISH_URL (pass it from the caller under secrets:, or set it as a repository or environment secret)"
             exit 1
           fi
           PUBLISH_BASE="${PUBLISH_URL%/}"
+          # Belt and braces: secrets are masked already, but also mask the
+          # trimmed base and its host part in case either appears in curl errors.
+          PUBLISH_HOST="${PUBLISH_BASE#*://}"
+          PUBLISH_HOST="${PUBLISH_HOST%%/*}"
+          echo "::add-mask::${PUBLISH_URL}"
+          echo "::add-mask::${PUBLISH_BASE}"
+          if [[ -n "$PUBLISH_HOST" ]]; then
+            echo "::add-mask::${PUBLISH_HOST}"
+          fi
           if [[ ! "$PUBLISH_BASE" =~ ^https:// ]]; then
-            echo "::error::publish_url must start with https://"
+            echo "::error::UU_PUBLISH_URL must start with https://"
             exit 1
           fi
 
@@ -383,4 +406,4 @@ jobs:
             -F "changelog=</tmp/changelog.txt" \
             -F "file=@${ZIP};type=application/zip"
 
-          echo "Published ${SLUG}@${VERSION} (channel=${CHANNEL}) to ${PUBLISH_BASE}"
+          echo "Published ${SLUG}@${VERSION} (channel=${CHANNEL})"
